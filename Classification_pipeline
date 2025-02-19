@@ -3,7 +3,7 @@
 rm(list=ls())
 options(java.parameters = "-Xmx8g")
 
-#librerie
+# libraries
 library(dplyr)
 library(mlr) 
 library(FSelector) 
@@ -11,12 +11,12 @@ library(rpart.plot)
 library(corrplot)
 library(bartMachine)
 
-#Lettura 
+# Reading
 setwd( "/Users/user/Desktop/polito/Business analytics/2021/consegne/laboratorioclassificazione/")
 dtab = read.csv("pilgrimABCmod.csv", header=TRUE)
 attach(dtab)
 
-#controllo sui clienti che non ci sono più nel 2000
+# control for the clients who left the bank in 2000
 sum(is.na(Online0))
 sum(is.na(Profit0))
 which(is.na(Profit0) != is.na(Online0))
@@ -25,7 +25,7 @@ which(is.na(Profit0) > is.na(Online0))
 
 #----------------------------------PREPROCESSING
 
-# Dividiamo il dataset in training and testing
+# train and test creation
 set.seed(100)
 train     = sample(nrow(dtab), 0.5*nrow(dtab), replace = FALSE)
 TrainSet  = dtab[train ,]
@@ -37,14 +37,14 @@ summarizeColumns(TrainSet)
 summarizeColumns(ValidSet)
 
 
-# Gestione outliers (rimozione profitti sopra i 50000)
+# handling outliers (remove profits over 50000)
 plot(TrainSet$Profit0,TrainSet$Profit9)
 TrainSet=TrainSet[-c(6669,2457,2363,9527,4192,5437,6823,4397),]
 
 plot(ValidSet$Profit0,ValidSet$Profit9)
 ValidSet=ValidSet[-c(14429),]
 
-#gestione missing 
+# handling missing data 
 TrainSet$AgeZero9 = ifelse(is.na(TrainSet$Age9),0,TrainSet$Age9)
 mm1 = mean(TrainSet$Age9, na.rm=TRUE)
 TrainSet$AgeAverage9 = ifelse(is.na(TrainSet$Age9),mm1,TrainSet$Age9)
@@ -71,7 +71,7 @@ ValidSet$IncomeAverage9=ifelse(is.na(ValidSet$Income9),mmm2,ValidSet$Income9)
 ValidSet$IncomeCategory9=as.factor(ValidSet$IncomeZero9)
 
 
-#Gestione variabili
+# handling variables
 TrainSet$District11009 = as.factor(ifelse(TrainSet$District9==1100,1,0))
 TrainSet$District12009 = as.factor(ifelse(TrainSet$District9==1200,1,0))
 TrainSet$District9=as.factor(TrainSet$District9)
@@ -156,21 +156,21 @@ list( train = summary(TrainSetmodel), test = summary(ValidSetmodel) )
 
 #---------------------------------PROCESSING
 
-#il modello ottimizzato
+#optimized model
 set.seed(1000)
 (model_task <- makeClassifTask(data=TrainSetmodel, target="Retain", positive="Gone"))
 
 
 
-#REGRESSIONE LOGISTICA
+#logistic regression
 
-#learner
+# learner
 (rl_prob<- makeLearner('classif.logreg', predict.type='prob'))
 
-#tuning degli hyperparameters
+#tuning hyperparameters
 getParamSet("classif.logreg")# non sono modificabili 
 
-#validazione modello
+# validation
 kFold <- makeResampleDesc(method = "RepCV", folds = 10, reps = 50,
                           stratify = TRUE)
 
@@ -180,7 +180,7 @@ kFold <- makeResampleDesc(method = "RepCV", folds = 10, reps = 50,
 
 
 
-#modello di train
+# train model
 set.seed(1000) 
 rlogistic_train <- train(learner=rl_prob, task=model_task)
 rlogisticmodeldata<-getLearnerModel(rlogistic_train)
@@ -189,23 +189,23 @@ rlogisticmodeldata<-getLearnerModel(rlogistic_train)
 #converting model parameters into odds ratio
 exp(cbind(Odds_Ratio = coef(rlogisticmodeldata), confint(rlogisticmodeldata)))
 
-#previsione
+# prevision
 set.seed(1000)
 (rlogistic_predict<- predict(rlogistic_train, newdata = ValidSetmodel, type='prob'))
 
 
-#confusion matrix
+# confusion matrix
 calculateConfusionMatrix(rlogistic_predict)
 rlogistic_predict %>% calculateROCMeasures()
 
 
-#roc curve e auc
+# roc curve and auc
 df = generateThreshVsPerfData(rlogistic_predict, measures = list(fpr, tpr, mmce))
 plotROCCurves(df)
 mlr::performance(rlogistic_predict, mlr::auc)
 
 
-#idea per scegliere una soglia
+# idea for a threshold
 plotThreshVsPerf(df)
 
 Logisticregression <- rlogistic_predict %>% setThreshold(0.35) 
@@ -214,13 +214,13 @@ Logisticregression <- rlogistic_predict %>% setThreshold(0.35)
 #? molto migliorata la previsione dei 'Gone'
 
 
-#DECISION TREE
+# DECISION TREE
 
 
-#learner
+# learner
 (dt_prob <- makeLearner('classif.rpart', predict.type="prob"))
 
-#tuning degli hyperparameters
+#tuning hyperparameters
 getParamSet("classif.rpart")
 
 
@@ -232,15 +232,15 @@ dt_param <- makeParamSet( makeDiscreteParam("minsplit", values=seq(5,10,1)),
                           makeDiscreteParam("maxdepth", values=seq(5,6,1) ))
 dt_param
 
-#tipo di ricerca: Grid
+# tipo di ricerca: Grid
 (ctrl = makeTuneControlGrid())
 
 
 
-#tipo di valutazione iperparametri: resampling 
+# evaluation of hyperparameters: resampling 
 rdesc = makeResampleDesc("CV", iters = 3L, stratify=TRUE)
 
-#valutazione
+# evaluation
 set.seed(1000) 
 (dt_tuneparam <- tuneParams(learner=dt_prob, 
                             resampling=rdesc, 
@@ -249,7 +249,7 @@ set.seed(1000)
                             control=ctrl, 
                             task=model_task, 
                             show.info = TRUE) ) 
-#i parametri migliori
+# best hyperparam
 dt_tuneparam
 
 list( `Optimal HyperParameters` = dt_tuneparam$x, 
@@ -257,7 +257,7 @@ list( `Optimal HyperParameters` = dt_tuneparam$x,
 
 
 
-#prendiamo allora i parametri di controllo migliori
+# selecting best control param
 ## minsplit = 8,
 ##minbucket = 2,
 ##maxdepth = 6,
@@ -267,34 +267,34 @@ list( `Optimal HyperParameters` = dt_tuneparam$x,
 
 dtree <- setHyperPars(dt_prob, par.vals = dt_tuneparam$x)
 
-#modello con parametri migliori
+# best model
 set.seed(1000) 
 dtree_train <- train(learner=dtree, task=model_task) 
 getLearnerModel(dtree_train)
 
 
-#alcuni plot
+# some plots
 rpart.plot(dtree_train$learner.model, roundint=FALSE, varlen=3, type = 3, clip.right.labs = FALSE, yesno = 2)
 rpart.rules(dtree_train$learner.model, roundint = FALSE)
 
 
 
-# facciamo previsione (classe)
+# class prediction
 set.seed(1000)
 (dtree_predict<- predict(dtree_train, newdata = ValidSetmodel))
 
 
-#confusion matrix
+# confusion matrix
 calculateConfusionMatrix(dtree_predict)
 dtree_predict %>% calculateROCMeasures()
 
-#roc curve e auc
+# roc curve and auc
 df = generateThreshVsPerfData(dtree_predict, measures = list(fpr, tpr, mmce))
 plotROCCurves(df)
 mlr::performance(dtree_predict, mlr::auc)
 
 
-#idea per scegliere una soglia
+# idea for a threshold
 plotThreshVsPerf(df)
 
 DecisionTree <- dtree_predict %>% setThreshold(0.2) 
@@ -303,26 +303,26 @@ DecisionTree <- dtree_predict %>% setThreshold(0.2)
 #? leggermente migliorata la previsione dei 'Gone'
 
 
-#RANDOM FOREST
-#learner
+# RANDOM FOREST
+# learner
 (rf_prob <- makeLearner('classif.randomForest', predict.type="prob"))
 
-#tuning degli hyperparameters
+# tuning hyperparameters
 getParamSet("classif.randomForest")
 
-#scelta intervalli
+# selecting intervals
 rf_param <- makeParamSet( makeDiscreteParam("ntree", values=seq(100,600,100)), 
                           makeDiscreteParam("mtry", values=seq(2,5,1)))
 
 rf_param
 
-#scelta ricerca: Grid Search
+# searching: Grid Search
 (ctrl = makeTuneControlGrid())
 
-#tipo di valutazione iperparametri: resampling 
+# evaluation of hyperparameters: resampling 
 rdesc = makeResampleDesc("CV", iters = 3L, stratify=TRUE)
 
-#valutazione
+# evaluation
 set.seed(1000) 
 (rf_tuneparam <- tuneParams(learner=rf_prob, 
                             resampling=rdesc, 
@@ -331,7 +331,7 @@ set.seed(1000)
                             control=ctrl, 
                             task=model_task, 
                             show.info = TRUE) ) 
-#i parametri migliori
+# best param
 rf_tuneparam
 
 list( `Optimal HyperParameters` = rf_tuneparam$x, 
@@ -339,34 +339,34 @@ list( `Optimal HyperParameters` = rf_tuneparam$x,
 
 
 
-#prendiamo allora i parametri di controllo migliori
+# selecting best param
 ## ntree =400 ,
 ##mtry = 6,
 rforest <- setHyperPars(rf_prob, par.vals = rf_tuneparam$x)
 
-#modello con parametri migliori
+# best model
 set.seed(1000) 
 rforest_train <- train(learner=rforest, task=model_task) 
 getLearnerModel(rforest_train)
 
 
 
-# facciamo previsione (classe)
+# class prediction
 set.seed(1000)
 (rforest_predict<- predict(rforest_train, newdata = ValidSetmodel))
 
 
-#confusion matrix
+# confusion matrix
 calculateConfusionMatrix(rforest_predict)
 rforest_predict %>% calculateROCMeasures()
 
-#roc curve e auc
+# roc curve and auc
 df = generateThreshVsPerfData(rforest_predict, measures = list(fpr, tpr, mmce))
 plotROCCurves(df)
 mlr::performance(rforest_predict, mlr::auc)
 
 
-#idea per scegliere una soglia
+# idea for a threshold
 plotThreshVsPerf(df)
 
 RandomForest <- rforest_predict %>% setThreshold(0.4) 
@@ -375,27 +375,27 @@ RandomForest <- rforest_predict %>% setThreshold(0.4)
 #?  migliorata la previsione dei 'Gone'
 
 
-#BAYES TREE
-#learner
+# BAYES TREE
+# learner
 (bt_prob<-makeLearner('classif.bartMachine', predict.type='prob'))
 
-#tuning degli hyperparameters
+# tuning hyperparameters
 getParamSet("classif.bartMachine")
 
-#scelta intervalli
+# chosing intervals
 bt_param <- makeParamSet( makeDiscreteParam("num_trees", values=seq(40,60,10)),
                           makeDiscreteParam("num_burn_in", values=seq(240,260,10)))
 
 
 bt_param
 
-#scelta ricerca: Grid Search
+# searching: Grid Search
 (ctrl = makeTuneControlGrid())
 
-#tipo di valutazione iperparametri: resampling 
+# evaluation of hyperparameters: resampling 
 rdesc = makeResampleDesc("CV", iters = 2, stratify=TRUE)
 
-#valutazione
+# evaluation
 set.seed(1000) 
 (bt_tuneparam <- tuneParams(learner=bt_prob, 
                             resampling=rdesc, 
@@ -404,7 +404,7 @@ set.seed(1000)
                             control=ctrl, 
                             task=model_task, 
                             show.info = TRUE) ) 
-#i parametri migliori
+# best param
 bt_tuneparam
 
 list( `Optimal HyperParameters` = bt_tuneparam$x, 
@@ -412,19 +412,19 @@ list( `Optimal HyperParameters` = bt_tuneparam$x,
 
 
 
-#prendiamo allora i parametri di controllo migliori
+# selecting best param
 ## num_trees =40 ,
 ##nu_burn_in = 240,
 btrees <- setHyperPars(bt_prob, par.vals = bt_tuneparam$x)
 
-#modello con parametri migliori
+# best model
 set.seed(1000) 
 btrees_train <- train(learner=btrees, task=model_task) 
 getLearnerModel(btrees_train)
 
 
 
-# facciamo previsione (classe)
+# class prediction
 set.seed(1000)
 (btrees_predict<- predict(btrees_train, newdata = ValidSetmodel))
 
@@ -433,19 +433,20 @@ set.seed(1000)
 calculateConfusionMatrix(btrees_predict)
 btrees_predict %>% calculateROCMeasures()
 
-#roc curve e auc
+#roc curve and auc
 df = generateThreshVsPerfData(btrees_predict, measures = list(fpr, tpr, mmce))
 plotROCCurves(df)
 mlr::performance(btrees_predict, mlr::auc)
 
 
-#idea per scegliere una soglia
+# idea for a threshold
 plotThreshVsPerf(df)
 
 Bayestrees <- btrees_predict %>% setThreshold(0.2) 
 (bt_performance <- Bayestrees %>%performance(measures = list(tpr,auc, mmce,tnr)) )
 (bt_cm <- Bayestrees %>% calculateROCMeasures() )
-#?  migliorata di molto la previsione dei 'Gone'
+
+# Comments: The prevision of the GONE clients has largely improved
 
 
 
